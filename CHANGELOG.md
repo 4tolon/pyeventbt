@@ -2,6 +2,31 @@
 
 All notable changes to PyEventBT will be documented in this file.
 
+## [0.0.14] - 2026-10-14
+
+This is a community-driven release. It adds per-run symbol/margin configuration for backtests and a new macro calendar connector for FXMacroData, both contributed by members of the PyEventBT community. It also introduces the first offline test suite in the repository.
+
+### Highlights
+
+**Per-run symbol info overrides for backtests**
+
+`Strategy.backtest()` now accepts a `symbols_info_override` parameter so callers can override any `SymbolInfo` field for a single backtest run without editing the packaged `default_symbols_info.yaml`. The simulator derives required margin solely from each symbol's `margin_initial` (e.g. `0.0333` → 30:1), so this is the supported way to change a symbol's effective leverage for a backtest — previously only achievable by editing the vendored YAML inside the installed package. A `"*"` key applies an override to every symbol; explicit per-symbol keys take precedence, and values are coerced to each field's existing type so `Decimal` fields (such as `margin_initial`) stay `Decimal` and margin arithmetic remains exact.
+
+**FXMacroData macro calendar connector**
+
+A new `FXMacroDataCalendarConnector` (`pyeventbt.data_provider.connectors.fxmacrodata_calendar_connector`) fetches point-in-time macro release schedules from the FXMacroData API so they can be used as event filters or features in event-driven strategies. It relies only on the standard library (no new dependencies), reads the API key from `FXMD_API_KEY` or `FXMACRODATA_API_KEY`, sends it in the `X-API-Key` header (never in the URL), refuses to follow HTTP redirects so the key cannot leak to another host, and validates the response shape before returning rows.
+
+### Features
+
+- Add `symbols_info_override` to `Strategy.backtest()`: a `dict[str, dict]` mapping a symbol name (or `"*"` for all symbols) to a dict of `SymbolInfo` field → value overrides, applied after the simulator loads its defaults and before the run starts. Enables per-run margin/leverage configuration (and any other symbol field) without modifying the packaged `default_symbols_info.yaml` (by [Meherett](https://github.com/meherett)).
+- Add `FXMacroDataCalendarConnector` with `fetch_calendar()`, `has_event_between()` and `next_events()` helpers, plus a `top_tier_only` filter for high-impact releases. Includes header-based auth, redirect blocking, API-key sanitisation and defensive parsing of malformed rows and payloads (by [Robert Tidball](https://github.com/roberttidball) / [FXMacroData](https://github.com/fxmacrodata)).
+
+### Tests
+
+- Add an offline `pytest` suite for the FXMacroData connector under `tests/` covering header auth, environment-variable fallback, key sanitisation, top-tier filtering, malformed payloads and redirect blocking.
+
+**Full Changelog**: [v0.0.13...v0.0.14](https://github.com/marticastany/pyeventbt/compare/v0.0.13...v0.0.14)
+
 ## [0.0.13] - 2026-06-04
 
 Fixes a redundant MT5 query in the live data provider that, in a rare timing window, could skip a bar and duplicate the next one. In `Mt5LiveDataProvider.update_bars`, a new bar was detected and recorded using one `get_latest_bar` call, but the bar actually delivered to the event queue came from a *second* `get_latest_bar` call. If a timeframe boundary fell between the two calls (a sub-millisecond window), the second call returned a different, newer bar than the one recorded in `last_bar_tf_datetime` — causing the gated bar to be skipped and the newer bar to be re-emitted on the following cycle. The fix reuses the already-fetched bar, which also removes a redundant IPC round-trip per symbol/timeframe on every update cycle. Backtesting is unaffected.
